@@ -25,6 +25,10 @@ Date: 2026-09-20 (Europe/London)
   `False`
 - `ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS`: not explicitly set; effective
   `v0.11.3` default is `True`
+- Companion Open Terminal: running as container user `user`, image
+  `ghcr.io/open-webui/open-terminal:0.12.3` at digest
+  `sha256:8f6d2045aa69e348e39d89bf59e6b267773532335333eed14ff16bbc7c964b73`;
+  it defines no Docker healthcheck
 
 ### Image configuration
 
