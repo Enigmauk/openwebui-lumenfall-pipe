@@ -1,10 +1,12 @@
 # Lumenfall Video Stage 2 — worker architecture
 
 Status: Checkpoints B and C are implemented; Checkpoint E has a mock-validated
-HTTP client and result downloader, development-only. No worker, video Pipe, or
-video Function has been deployed or imported. No production configuration was
-changed, and no runtime Lumenfall video request was made. Checkpoint D remains
-partially verified and incomplete.
+HTTP client and result downloader, and Checkpoint G has a mock-validated
+development Pipe-to-worker flow. Nothing has been deployed or imported into
+Open WebUI as a video component; the existing image Pipe remains unchanged. No
+production configuration was changed, and no runtime Lumenfall video request
+was made. Checkpoint D remains partially verified and incomplete; Checkpoint F
+remains blocked.
 
 ## Scope and boundary
 
@@ -240,6 +242,54 @@ durability and cleanup were verified, while chat attachment rendering/history
 reload and exact persisted representation/base64 absence remain unverified.
 The HTTP 403 and Replay configuration are unresolved; Checkpoint F remains
 blocked.
+
+## Checkpoint G development-only integration
+
+`lumenfall_video_pipe.py` is a separate Open WebUI Pipe facade; it does not
+modify or import the deployed image Pipe. Its administrator-editable video
+catalogue contains only explicit `video:<model-id>` selectors with `LF Video ·`
+labels. Model prompts cannot set an owner, chat ID, message ID, worker origin,
+or worker credential. The pinned v0.11.3 Function invocation supplies the
+authenticated `__user__`, `__metadata__`, `__message_id__`, and `__request__`;
+the facade derives ownership and saved-message identity from those fields and
+normalizes only the bearer or `token` cookie value into the current user's
+credential. It never forwards a Cookie header.
+
+Any non-null `__task__`, including an unknown future task name, returns before
+reading the body, identity, request credential, or worker-secret provider.
+Invalid selectors, options, and missing/temporary chat or message identifiers
+also fail before worker-client construction. The worker HTTP client uses the
+fixed administrator-owned `http://lumenfall-video-worker:8000` origin and a
+separate worker Bearer read lazily from `/run/secrets/lumenfall-video-worker-bearer`;
+tests inject a fake Bearer provider and ASGI transport. The response parser is
+bounded to 64 KiB and accepts only known worker states and sanitized fields.
+The Pipe polls only for a small configured number of status checks. If the job
+is still active, it returns its local job ID and status; it does not cancel or
+resubmit. Status, cancellation, and delivery-credential refresh all use the
+owner-scoped worker routes.
+
+Before the worker claims a provider submission, its required
+`SavedChatVerifier` collaborator checks that the initiating user owns the
+saved chat/message using the single current-user credential. Missing or
+negative verification fails closed without consuming the one-submit claim or
+contacting the provider. Checkpoint G supplies a deterministic fake ownership
+collaborator; a production Open WebUI ownership client has not been created or
+validated. The persistence boundary receives the owner, chat, and assistant
+message IDs together with the downloaded file so tests can prove attribution.
+The Pipe emits the existing `files` event with a generic local file reference;
+it makes no assertion about whether v0.11.3 renders that file inline, as a
+video, or as an attachment. No base64 or expiring provider URL is emitted.
+
+`tests/test_video_pipe.py` exercises the real Pipe client, FastAPI routes, and
+worker service through ASGI transports, with deterministic fake provider,
+synthetic MP4 download, fake saved-chat ownership, and fake persistence. It
+covers duplicate reuse/conflict, owner isolation, ambiguous submission,
+transient polling, provider/download failure, credential refresh, cancellation,
+bounded Pipe observation, and service reconstruction. The downloader's DNS
+resolver and every HTTP transport remain injected; tests perform no real DNS
+or socket activity. This proves the development component boundaries only;
+it does not establish production Open WebUI attachment rendering, deployment
+configuration, secrets, or external connectivity.
 
 ## Current gates and implementation boundary
 

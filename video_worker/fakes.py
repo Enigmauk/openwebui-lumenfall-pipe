@@ -44,10 +44,38 @@ class FakePersistence:
     def __init__(self, *, fail_auth: bool = False):
         self.fail_auth = fail_auth
         self.calls = 0
+        self.records: list[dict[str, object]] = []
 
     async def persist(self, *, job_id: str, content: bytes, mime: str,
-                      credential: str) -> str:
+                      credential: str, owner_user_id: str, chat_id: str,
+                      assistant_message_id: str) -> str:
         self.calls += 1
         if self.fail_auth:
             raise PermissionError("expired")
+        self.records.append({
+            "job_id": job_id,
+            "content": content,
+            "mime": mime,
+            "owner_user_id": owner_user_id,
+            "chat_id": chat_id,
+            "assistant_message_id": assistant_message_id,
+        })
         return f"file_{job_id}"
+
+
+class FakeSavedChatVerifier:
+    """Mock Open WebUI ownership check; never contacts the live instance."""
+
+    def __init__(self, saved_messages: set[tuple[str, str, str]] | None = None):
+        self.saved_messages = saved_messages
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def is_saved_message_owned(self, *, owner_user_id: str, chat_id: str,
+                                     assistant_message_id: str,
+                                     credential: str) -> bool:
+        self.calls.append((owner_user_id, chat_id, assistant_message_id))
+        if not credential:
+            return False
+        if self.saved_messages is None:
+            return True
+        return (owner_user_id, chat_id, assistant_message_id) in self.saved_messages

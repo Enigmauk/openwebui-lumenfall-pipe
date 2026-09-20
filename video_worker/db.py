@@ -26,7 +26,9 @@ class InvalidTransition(ValueError):
 
 
 TRANSITIONS: dict[WorkerState, set[WorkerState]] = {
-    WorkerState.PENDING_SUBMIT: {WorkerState.SUBMITTING, WorkerState.CANCEL_REQUESTED},
+    WorkerState.PENDING_SUBMIT: {
+        WorkerState.SUBMITTING, WorkerState.CANCEL_REQUESTED, WorkerState.FAILED,
+    },
     WorkerState.SUBMITTING: {
         WorkerState.QUEUED, WorkerState.IN_PROGRESS, WorkerState.SUBMIT_AMBIGUOUS,
         WorkerState.FAILED,

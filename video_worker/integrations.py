@@ -11,7 +11,7 @@ from .db import JobStore
 from .downloader import SecureResultDownloader
 from .lumenfall_http import LumenfallKeyProvider, LumenfallVideoClient
 from .security import SecretBox
-from .service import Persistence, WorkerService
+from .service import Persistence, SavedChatVerifier, WorkerService
 
 
 def create_http_worker_service(
@@ -21,6 +21,7 @@ def create_http_worker_service(
     secret_box: SecretBox,
     fingerprint_key: bytes,
     key_provider: LumenfallKeyProvider,
+    saved_chat_verifier: SavedChatVerifier,
     artifact_directory: str | Path,
     api_transport: httpx.AsyncBaseTransport | None = None,
     download_transport: httpx.AsyncBaseTransport | None = None,
@@ -40,4 +41,5 @@ def create_http_worker_service(
     return WorkerService(
         store, backend, persistence, secret_box, fingerprint_key,
         artifact_directory=artifact_directory, downloader=downloader,
+        saved_chat_verifier=saved_chat_verifier,
     )

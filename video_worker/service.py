@@ -25,7 +25,14 @@ class VideoBackend(Protocol):
 
 class Persistence(Protocol):
     async def persist(self, *, job_id: str, content: bytes, mime: str,
-                      credential: str) -> str: ...
+                      credential: str, owner_user_id: str, chat_id: str,
+                      assistant_message_id: str) -> str: ...
+
+
+class SavedChatVerifier(Protocol):
+    async def is_saved_message_owned(self, *, owner_user_id: str, chat_id: str,
+                                     assistant_message_id: str,
+                                     credential: str) -> bool: ...
 
 
 class ResultDownloader(Protocol):
@@ -39,7 +46,8 @@ class WorkerService:
     def __init__(self, store: JobStore, backend: VideoBackend, persistence: Persistence,
                  secret_box: SecretBox, fingerprint_key: bytes,
                  artifact_directory: str | Path | None = None,
-                 downloader: ResultDownloader | None = None):
+                 downloader: ResultDownloader | None = None,
+                 saved_chat_verifier: SavedChatVerifier | None = None):
         self.store = store
         self.backend = backend
         self.persistence = persistence
@@ -49,6 +57,7 @@ class WorkerService:
         self.artifact_directory = Path(artifact_directory or default_directory)
         self.artifact_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.downloader = downloader
+        self.saved_chat_verifier = saved_chat_verifier
 
     @staticmethod
     def context(owner: str, chat: str, message: str) -> str:
@@ -95,10 +104,38 @@ class WorkerService:
         return job
 
     async def _submit(self, job_id: str) -> JobRecord:
+        candidate = self.store.get(job_id)
+        if not candidate:
+            raise LookupError(job_id)
+        if candidate.worker_state is not WorkerState.PENDING_SUBMIT:
+            return candidate
+        context = self.context(
+            candidate.owner_user_id, candidate.chat_id, candidate.assistant_message_id
+        )
+        try:
+            if not self.saved_chat_verifier or not candidate.credential_ciphertext:
+                raise ValueError("verification unavailable")
+            credential = self.secret_box.decrypt(
+                candidate.credential_ciphertext, context=context
+            ).decode()
+            saved = await self.saved_chat_verifier.is_saved_message_owned(
+                owner_user_id=candidate.owner_user_id,
+                chat_id=candidate.chat_id,
+                assistant_message_id=candidate.assistant_message_id,
+                credential=credential,
+            )
+        except Exception:
+            saved = False
+        if not saved:
+            return self.store.transition(
+                job_id, WorkerState.FAILED,
+                request_ciphertext=None, credential_ciphertext=None,
+                credential_expires_at=None,
+                last_safe_error="SAVED_CHAT_UNAVAILABLE",
+            )
         job = self.store.claim_submission(job_id)
         if not job:
             return self.store.get(job_id)
-        context = self.context(job.owner_user_id, job.chat_id, job.assistant_message_id)
         request = json.loads(self.secret_box.decrypt(job.request_ciphertext, context=context))
         try:
             upstream = await self.backend.submit(
@@ -250,6 +287,8 @@ class WorkerService:
             file_id = await self.persistence.persist(
                 job_id=job.job_id, content=artifact.read_bytes(),
                 mime=job.output_mime, credential=credential,
+                owner_user_id=job.owner_user_id, chat_id=job.chat_id,
+                assistant_message_id=job.assistant_message_id,
             )
         except PermissionError:
             return self.store.transition(

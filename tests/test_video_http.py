@@ -20,6 +20,7 @@ from video_worker.downloader import (
 from video_worker.lumenfall_http import LumenfallVideoClient
 from video_worker.db import JobStore
 from video_worker.integrations import create_http_worker_service
+from video_worker.fakes import FakeSavedChatVerifier
 from video_worker.models import AmbiguousSubmit, PermanentVideoError, WorkerState
 from video_worker.security import SecretBox
 
@@ -609,9 +610,11 @@ class RealCollaboratorWorkerIntegrationTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.content = None
 
-            async def persist(self, *, job_id, content, mime, credential):
+            async def persist(self, *, job_id, content, mime, credential,
+                              owner_user_id, chat_id, assistant_message_id):
                 self.content = content
-                self.asserted = (job_id, mime, credential)
+                self.asserted = (job_id, mime, credential, owner_user_id, chat_id,
+                                 assistant_message_id)
                 return f"file_{job_id}"
 
         with tempfile.TemporaryDirectory() as temp:
@@ -624,6 +627,7 @@ class RealCollaboratorWorkerIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 secret_box=SecretBox(b"e" * 32),
                 fingerprint_key=b"f" * 32,
                 key_provider=FakeKeyProvider(),
+                saved_chat_verifier=FakeSavedChatVerifier(),
                 artifact_directory=artifacts,
                 api_transport=httpx.MockTransport(api),
                 download_transport=httpx.MockTransport(download),
@@ -657,7 +661,8 @@ class RealCollaboratorWorkerIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(final.openwebui_file_id, f"file_{test_job.job_id}")
                 self.assertEqual(persistence.content, media)
                 self.assertEqual(persistence.asserted,
-                                 (test_job.job_id, "video/mp4", "fake-openwebui-credential"))
+                                 (test_job.job_id, "video/mp4", "fake-openwebui-credential",
+                                  "user-test", "chat-test", "message-test"))
             finally:
                 await service.backend.aclose()
                 await service.downloader.aclose()

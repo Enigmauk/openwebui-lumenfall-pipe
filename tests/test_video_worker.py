@@ -8,7 +8,7 @@ import httpx
 
 from video_worker.app import create_app
 from video_worker.db import DuplicateRequestConflict, InvalidTransition, JobStore
-from video_worker.fakes import FakePersistence, FakeVideoBackend
+from video_worker.fakes import FakePersistence, FakeSavedChatVerifier, FakeVideoBackend
 from video_worker.models import AmbiguousSubmit, UpstreamJob, WorkerState
 from video_worker.security import SecretBox
 from video_worker.service import WorkerService
@@ -23,10 +23,12 @@ class WorkerFixture:
         self.db_path = Path(self.directory.name) / "worker.sqlite3"
         self.backend = FakeVideoBackend()
         self.persistence = FakePersistence()
+        self.saved_chat_verifier = FakeSavedChatVerifier()
         self.store = JobStore(self.db_path)
         self.box = SecretBox(b"e" * 32)
         self.service = WorkerService(
-            self.store, self.backend, self.persistence, self.box, b"f" * 32
+            self.store, self.backend, self.persistence, self.box, b"f" * 32,
+            saved_chat_verifier=self.saved_chat_verifier,
         )
 
     def tearDown(self):
@@ -151,7 +153,10 @@ class LifecycleTests(WorkerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submitted.worker_state, WorkerState.QUEUED)
         self.store.close()
         self.store = JobStore(self.db_path)
-        self.service = WorkerService(self.store, self.backend, self.persistence, self.box, b"f" * 32)
+        self.service = WorkerService(
+            self.store, self.backend, self.persistence, self.box, b"f" * 32,
+            saved_chat_verifier=self.saved_chat_verifier,
+        )
         recovered = self.store.recover()
         self.assertEqual([item.job_id for item in recovered], [job.job_id])
         self.backend.set_results("video_1", UpstreamJob("video_1", "in_progress"))
@@ -169,7 +174,10 @@ class LifecycleTests(WorkerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(downloading.worker_state, WorkerState.DOWNLOADING)
         self.store.close()
         self.store = JobStore(self.db_path)
-        self.service = WorkerService(self.store, self.backend, self.persistence, self.box, b"f" * 32)
+        self.service = WorkerService(
+            self.store, self.backend, self.persistence, self.box, b"f" * 32,
+            saved_chat_verifier=self.saved_chat_verifier,
+        )
         self.store.recover()
         final = await self.service.run_until_stable(job.job_id)
         self.assertEqual(final.worker_state, WorkerState.COMPLETED)
