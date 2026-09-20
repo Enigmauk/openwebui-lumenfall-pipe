@@ -70,9 +70,10 @@ No undocumented internal persistence API is required by version 0.1.
 
 ## Replaceable abstractions
 
-`KeyProvider` separates secret retrieval from generation. Version 0.1 uses the
-masked admin Valve provider; a reviewed read-only secret-file provider can be
-substituted later without changing `LumenfallClient`.
+`KeyProvider` separates secret retrieval from generation. Version 0.1 uses
+`SecretFileKeyProvider`, which reads only the fixed
+`/run/secrets/lumenfall-api-key` path. The file is mounted individually and
+read-only; there is no key Valve or configurable secret path.
 
 `PersistenceAdapter` separates generation from Open WebUI persistence. Tests use
 an in-memory fake; production uses only the public file API adapter.
@@ -83,3 +84,12 @@ User-visible errors are normalized and never include upstream bodies, request
 headers, keys, or full prompts. Missing key, missing interactive request/event
 context, invalid models, malformed responses, invalid/oversized media, known
 HTTP statuses, transport failures, and timeouts fail closed.
+
+## Cost estimation
+
+`LumenfallClient.estimate()` sends the same bounded `n=1`, optional-size request
+to the fixed endpoint with `?dryRun=true`. It validates the documented estimate
+shape and returns only model, provider, currency, and cost micros. It is an
+operator validation path, not a selector-visible generation mode. Normal image
+responses supply provider/effective-cost metadata for the concise future status
+`Lumenfall · Friendly Model · Provider · $0.000`; no price is hard-coded.

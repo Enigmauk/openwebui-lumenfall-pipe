@@ -1,37 +1,25 @@
 # Installation, update, and rollback
 
-## Stage 1 stop
+## Production installation
 
-Do not install or enable this Function in production yet. Do not add a key,
-change Valve encryption, modify Compose, add credit, or make a real request.
-
-## Preconditions for a later reviewed Stage 2
-
-1. Review `SECURITY.md` and approve a server-side key-storage method.
-2. Re-run `TESTING.md` against the still-pinned production version.
-3. Take and verify the normal pre-change Open WebUI backup.
-4. Confirm available disk space and current storage provider.
-5. Review the exact curated models and optional default size.
-6. Decide whether a Lumenfall dry-run cost check will precede the first paid
-   generation.
-7. Define a small first-live-test budget and operator.
-
-## Later installation outline
-
-These steps are intentionally descriptive rather than authorization to execute:
-
-1. In Open WebUI Admin → Functions, create a new Function from the reviewed
+1. Take and verify the established Open WebUI pre-change backup.
+2. Create the protected host secret file without exposing its contents.
+3. Mount only that file, read-only, at
+   `/run/secrets/lumenfall-api-key`; validate Compose and recreate only Open
+   WebUI.
+4. In Open WebUI Admin → Functions, create a new Function from the reviewed
    `lumenfall_pipe.py` at a stable Python-identifier ID such as
    `lumenfall_media`.
-2. Leave it disabled while configuring `MODEL_LIST`, size, timeout, and media
+5. Leave it disabled while reviewing `MODEL_LIST`, size, timeout, and media
    limit.
-3. Configure the approved key provider. A masked Valve is not acceptable while
-   live Valve encryption remains disabled.
-4. Enable the Function only after a non-paid/mock validation.
-5. Verify selector labels, internal-task suppression, one tightly controlled
-   generation, user ownership, assistant-message attachment, page reload,
-   download/access behavior, logs, and charged cost metadata.
-6. Verify the new durable state is included in the existing Open WebUI backup.
+6. Verify imported source hash, absence of a key Valve, selector entries,
+   task suppression, missing-key failure, and a mocked persistence cycle.
+7. Enable the Function and run documented authenticated dry runs only.
+8. Stop before paid generation; the first paid request is a separate Stage 3
+   decision and should use a sub-cent model.
+
+Lumenfall account recovery uses GitHub sign-in/OAuth. Never record the OAuth
+credential, API key, cookies, session data, or authentication URLs.
 
 ## Update
 
@@ -45,7 +33,9 @@ Pipe update with an Open WebUI upgrade unless both rollback paths are explicit.
 1. Disable the Function.
 2. Restore the previously exported/reviewed Function source if rollback of code
    is needed.
-3. Remove or revoke the Lumenfall key through its approved storage mechanism.
+3. Revoke the key at Lumenfall and remove the exact host secret file if secret
+   rollback is required; removing the Compose mount requires a validated
+   Open WebUI-only recreate.
 4. Leave generated user files alone unless their owners explicitly request
    deletion; they are normal Open WebUI files, not disposable cache entries.
 5. If a database restore is genuinely required, use the established verified

@@ -1,11 +1,14 @@
 import base64
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 
 from lumenfall_pipe import (
+    DEFAULT_MODEL_LIST,
     GeneratedImage,
     IMAGE_GENERATIONS_URL,
     INTERNAL_TASK_RESPONSE,
@@ -13,10 +16,12 @@ from lumenfall_pipe import (
     LumenfallPipeError,
     OpenWebUIPublicFileAdapter,
     Pipe,
+    SecretFileKeyProvider,
     decode_image,
     detect_image_content_type,
     extract_prompt,
     parse_generation_response,
+    parse_cost_estimate,
     parse_model_list,
     selected_model_id,
 )
@@ -82,10 +87,16 @@ class ModelAndPromptTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_model_list_does_not_require_network_or_key(self):
         pipe = Pipe()
-        pipe.valves.LUMENFALL_API_KEY = ""
         pipe.valves.MODEL_LIST = "model-a | Always visible"
         pipe._transport = httpx.MockTransport(lambda request: (_ for _ in ()).throw(httpx.ConnectError("offline")))
         self.assertEqual((await pipe.pipes())[0]["id"], "model-a")
+
+    def test_stage2_default_selector_has_14_curated_models(self):
+        entries = parse_model_list(DEFAULT_MODEL_LIST)
+        self.assertEqual(len(entries), 14)
+        self.assertEqual(entries[0], parse_model_list("seedream-5-lite | Seedream 5 Lite")[0])
+        self.assertEqual(entries[-1].model_id, "grok-imagine-image-pro")
+        self.assertEqual(len({entry.model_id for entry in entries}), 14)
 
     def test_selected_manifold_model(self):
         entries = parse_model_list("vertex/model-a | A")
@@ -143,7 +154,6 @@ class TaskProtectionTests(unittest.IsolatedAsyncioTestCase):
             "memory_review",
         ]
         pipe = Pipe()
-        pipe.valves.LUMENFALL_API_KEY = ""
         for task in documented_tasks:
             with self.subTest(task=task):
                 result = await pipe.pipe({}, __task__=task)
@@ -205,6 +215,15 @@ class DecodingTests(unittest.TestCase):
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
+    def test_secret_file_key_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "key"
+            path.write_text("  local-test-key\n", encoding="utf-8")
+            self.assertEqual(SecretFileKeyProvider(path=path).get_key(), "local-test-key")
+
+    def test_secret_file_key_provider_missing_file_fails_closed(self):
+        self.assertEqual(SecretFileKeyProvider(path=Path("/definitely/missing/key")).get_key(), "")
+
     async def test_missing_key_fails_closed(self):
         client = LumenfallClient(key_provider=StaticKeyProvider(""), timeout_seconds=1, max_image_bytes=1024)
         with self.assertRaisesRegex(LumenfallPipeError, "no API key"):
@@ -239,6 +258,36 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         )
         result = await client.generate(model="vertex/model-a", prompt="hello")
         self.assertEqual(result.images[0].data, PNG)
+
+    async def test_dry_run_uses_query_and_parses_estimate(self):
+        def handler(request):
+            self.assertEqual(request.url.path, "/openai/v1/images/generations")
+            self.assertEqual(request.url.params["dryRun"], "true")
+            return httpx.Response(
+                200,
+                json={
+                    "estimated": True,
+                    "model": "flux.2-klein-4b",
+                    "provider": "fal",
+                    "total_cost_micros": 1000,
+                    "currency": "USD",
+                    "components": [],
+                },
+            )
+
+        client = LumenfallClient(
+            key_provider=StaticKeyProvider(),
+            timeout_seconds=1,
+            max_image_bytes=1024,
+            transport=httpx.MockTransport(handler),
+        )
+        estimate = await client.estimate(model="flux.2-klein-4b", prompt="hello")
+        self.assertEqual(estimate.total_cost_micros, 1000)
+        self.assertEqual(estimate.provider, "fal")
+
+    def test_invalid_dry_run_response_is_rejected(self):
+        with self.assertRaisesRegex(LumenfallPipeError, "invalid cost estimate"):
+            parse_cost_estimate({"estimated": False, "total_cost_micros": 0})
 
     async def test_normalized_http_errors(self):
         expected = {
@@ -317,7 +366,7 @@ class PersistenceAndPipeTests(unittest.IsolatedAsyncioTestCase):
     async def test_pipe_uses_persistence_adapter_and_files_event(self):
         pipe = Pipe()
         pipe.valves.MODEL_LIST = "vertex/model-a | Model A"
-        pipe.valves.LUMENFALL_API_KEY = "stage1-test-key"
+        pipe._key_provider_factory = lambda valves: StaticKeyProvider()
         pipe._transport = httpx.MockTransport(lambda request: httpx.Response(200, json=response_payload()))
         persistence = FakePersistence()
         pipe._persistence = persistence

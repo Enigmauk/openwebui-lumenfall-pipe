@@ -1,26 +1,18 @@
 # Security
 
-## Stage 1 state
+## Secret storage
 
-No Lumenfall key exists in this project or was requested during Stage 1. No real
-Lumenfall request was made. Tests use fixed fake values and mock transports.
-
-The live Open WebUI deployment has a configured `WEBUI_SECRET_KEY`, but
-`ENABLE_VALVE_ENCRYPTION` is not explicitly set. In `v0.11.3` its default is
-`False`. A password-style Valve masks the UI only; it does not encrypt the value
-at rest. Therefore a production key must not be added to the Valve until the
-Stage 2 secret-storage decision is explicitly approved.
+The Lumenfall key is never stored in this project, Compose text, a Valve, or the
+Open WebUI database. `ENABLE_VALVE_ENCRYPTION` remains unchanged. The host file
+is `/opt/stacks/openwebui/secrets/lumenfall-api-key`, protected by a `0700`
+directory and `0600` file, and mounted as the single read-only container file
+`/run/secrets/lumenfall-api-key`.
 
 ## Secret abstraction
 
-`LumenfallClient` depends on `KeyProvider`, not directly on a Valve. The current
-`ValveKeyProvider` is a prototype implementation. Stage 2 should choose one of:
-
-1. deliberately enable and operationally validate Open WebUI Valve encryption,
-   understanding that stable `WEBUI_SECRET_KEY` retention becomes a recovery
-   dependency; or
-2. add a narrowly mounted, read-only secret file and a minimal provider that
-   reads only that fixed path.
+`LumenfallClient` depends on `KeyProvider`, not directly on storage. The
+production `SecretFileKeyProvider` reads only the fixed path and returns empty
+on missing/unreadable files, making generation fail closed.
 
 Do not infer encryption from masked UI rendering. Do not put a key in Git,
 Compose text, logs, tests, chat history, screenshots, or exception messages.
@@ -34,6 +26,8 @@ Compose text, logs, tests, chat history, screenshots, or exception messages.
 - `pipes()` is entirely local and cannot spend money.
 - Missing keys fail closed.
 - Timeouts are bounded.
+- Authenticated cost checks use Lumenfall's documented `dryRun=true` mode, which
+  does not execute generation or affect account balance.
 
 ## Media controls
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0-stage2 — 2026-09-20
+
+- Finalized a 14-model exploratory catalogue focused on Seedream, Qwen, Wan,
+  Z-Image, FLUX.2, and Grok Imagine.
+- Replaced the prototype Valve key with a fixed read-only secret-file provider
+  at `/run/secrets/lumenfall-api-key`.
+- Added authenticated, non-generating Lumenfall dry-run cost estimation support.
+- Changed future success status text to use friendly model, returned provider,
+  and returned effective cost metadata without hard-coded prices.
+- Added secret-file, catalogue, and dry-run tests and updated production,
+  security, architecture, testing, and rollback documentation.
+
+No paid image generation is part of Stage 2.
+
 ## 0.1.0-stage1 — 2026-09-20
 
 - Added an async image-only Lumenfall manifold Pipe for Open WebUI `v0.11.3`.

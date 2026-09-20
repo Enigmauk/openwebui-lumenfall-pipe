@@ -99,9 +99,11 @@ Bearer authentication, `POST /images/generations`, `response_format=b64_json`,
 `data[].b64_json`, normalized error statuses, and `metadata.cost`,
 `cost_currency`, `provider`, `provider_name`, and `executed_model`.
 
-Provider-forced IDs such as `vertex/<model>` are passed through unchanged.
-Lumenfall routing and fallback are not reproduced locally. Dry-run is documented
-but intentionally not called or implemented in Stage 1.
+Provider-forced IDs such as `fal/<model>` are passed through unchanged.
+Lumenfall routing and fallback are not reproduced locally. Stage 2 implements
+the documented `?dryRun=true` cost-estimation request and validates only the
+documented `estimated`, `model`, `provider`, `total_cost_micros`, and `currency`
+fields. It does not expose dry run as a selector entry.
 
 ## Upgrade gate
 

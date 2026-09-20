@@ -34,6 +34,8 @@ Coverage includes:
 - key/prompt redaction from errors;
 - persistence interface use and persistent `files` event shape;
 - selector availability when Lumenfall is unreachable.
+- the 14-entry Stage 2 default catalogue and fixed secret-file provider;
+- authenticated dry-run query construction and estimate validation.
 
 ## Stage 1 live synthetic persistence proof
 
@@ -51,7 +53,7 @@ The short-lived authentication token existed only inside the test process and
 was never printed or stored. This was an Open WebUI persistence test, not a
 Lumenfall request.
 
-## Mandatory pre-production integration checks
+## Production integration checks
 
 - no internal task causes an outbound request;
 - selector entries exist during simulated Lumenfall outage;

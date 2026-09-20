@@ -12,6 +12,7 @@ import base64
 import binascii
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 import httpx
@@ -20,7 +21,22 @@ from pydantic import BaseModel, Field
 
 LUMENFALL_BASE_URL = "https://api.lumenfall.ai/openai/v1"
 IMAGE_GENERATIONS_URL = f"{LUMENFALL_BASE_URL}/images/generations"
+LUMENFALL_SECRET_PATH = Path("/run/secrets/lumenfall-api-key")
 INTERNAL_TASK_RESPONSE = ""
+DEFAULT_MODEL_LIST = """seedream-5-lite | Seedream 5 Lite
+seedream-4.5 | Seedream 4.5
+qwen-image-2512 | Qwen Image 2512
+qwen-image | Qwen Image
+qwen-image-max | Qwen Image Max
+wan-2.7 | Wan 2.7
+wan-2.6 | Wan 2.6
+z-image-turbo | Z-Image Turbo
+flux.2-klein-4b | FLUX.2 Klein 4B
+flux.2-klein-9b | FLUX.2 Klein 9B
+flux.2-dev-flash | FLUX.2 Dev Flash
+flux.2-max | FLUX.2 Max
+grok-imagine-image | Grok Imagine
+grok-imagine-image-pro | Grok Imagine Pro"""
 
 
 class LumenfallPipeError(RuntimeError):
@@ -54,17 +70,30 @@ class GenerationResult:
     metadata: GenerationMetadata
 
 
+@dataclass(frozen=True)
+class CostEstimate:
+    model: str
+    provider: str | None
+    total_cost_micros: int
+    currency: str
+
+
 class KeyProvider(Protocol):
     def get_key(self) -> str:
         """Return the Lumenfall key or an empty string when unavailable."""
 
 
-class ValveKeyProvider:
-    def __init__(self, valves: Any):
-        self._valves = valves
+class SecretFileKeyProvider:
+    """Read the key only from the fixed, read-only container secret path."""
+
+    def __init__(self, _valves: Any = None, path: Path = LUMENFALL_SECRET_PATH):
+        self._path = path
 
     def get_key(self) -> str:
-        return str(getattr(self._valves, "LUMENFALL_API_KEY", "") or "").strip()
+        try:
+            return self._path.read_text(encoding="utf-8").strip()
+        except (FileNotFoundError, PermissionError, OSError):
+            return ""
 
 
 class PersistenceAdapter(Protocol):
@@ -212,6 +241,32 @@ def parse_generation_response(payload: Any, max_bytes: int) -> GenerationResult:
     return GenerationResult(images=images, metadata=metadata)
 
 
+def parse_cost_estimate(payload: Any) -> CostEstimate:
+    if not isinstance(payload, dict) or payload.get("estimated") is not True:
+        raise LumenfallPipeError("Lumenfall returned an invalid cost estimate.")
+    model = payload.get("model")
+    total_cost_micros = payload.get("total_cost_micros")
+    currency = payload.get("currency")
+    provider = payload.get("provider")
+    if (
+        not isinstance(model, str)
+        or not model
+        or not isinstance(total_cost_micros, int)
+        or isinstance(total_cost_micros, bool)
+        or total_cost_micros < 0
+        or not isinstance(currency, str)
+        or not currency
+        or (provider is not None and not isinstance(provider, str))
+    ):
+        raise LumenfallPipeError("Lumenfall returned an invalid cost estimate.")
+    return CostEstimate(
+        model=model,
+        provider=provider,
+        total_cost_micros=total_cost_micros,
+        currency=currency,
+    )
+
+
 ERRORS_BY_STATUS = {
     400: "Lumenfall rejected the image request.",
     401: "Lumenfall authentication failed.",
@@ -248,11 +303,14 @@ class LumenfallClient:
             request["size"] = size.strip()
         return request
 
-    async def generate(self, *, model: str, prompt: str, size: str = "") -> GenerationResult:
+    def _headers(self) -> dict[str, str]:
         api_key = self._key_provider.get_key()
         if not api_key:
             raise LumenfallPipeError("Lumenfall is not configured: no API key is available.")
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    async def estimate(self, *, model: str, prompt: str, size: str = "") -> CostEstimate:
+        """Validate and price a request without executing image generation."""
         try:
             async with httpx.AsyncClient(
                 timeout=self._timeout_seconds,
@@ -260,7 +318,32 @@ class LumenfallClient:
             ) as client:
                 response = await client.post(
                     IMAGE_GENERATIONS_URL,
-                    headers=headers,
+                    params={"dryRun": "true"},
+                    headers=self._headers(),
+                    json=self.build_request(model, prompt, size),
+                )
+        except httpx.TimeoutException as exc:
+            raise LumenfallPipeError("Lumenfall timed out while estimating the image request.") from exc
+        except httpx.HTTPError as exc:
+            raise LumenfallPipeError("Lumenfall could not be reached.") from exc
+        if response.status_code >= 400:
+            raise LumenfallPipeError(
+                ERRORS_BY_STATUS.get(response.status_code, "Lumenfall returned an unexpected error.")
+            )
+        try:
+            return parse_cost_estimate(response.json())
+        except ValueError as exc:
+            raise LumenfallPipeError("Lumenfall returned malformed JSON.") from exc
+
+    async def generate(self, *, model: str, prompt: str, size: str = "") -> GenerationResult:
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                response = await client.post(
+                    IMAGE_GENERATIONS_URL,
+                    headers=self._headers(),
                     json=self.build_request(model, prompt, size),
                 )
         except httpx.TimeoutException as exc:
@@ -348,27 +431,23 @@ def _extension(content_type: str) -> str:
     }[content_type]
 
 
-def _status_summary(metadata: GenerationMetadata) -> str:
+def _status_summary(model_name: str, metadata: GenerationMetadata) -> str:
     provider = metadata.provider_name or metadata.provider
-    pieces = ["Image created"]
+    pieces = ["Lumenfall", model_name]
     if provider:
-        pieces.append(f"via {provider}")
+        pieces.append(provider)
     if metadata.cost is not None:
         currency = metadata.cost_currency or "USD"
-        pieces.append(f"cost {metadata.cost:g} {currency}")
-    return "; ".join(pieces)
+        cost = f"{metadata.cost:.3f}"
+        pieces.append(f"${cost}" if currency == "USD" else f"{cost} {currency}")
+    return " · ".join(pieces)
 
 
 class Pipe:
     class Valves(BaseModel):
         MODEL_LIST: str = Field(
-            default="gemini-3-pro-image | Gemini 3 Pro Image",
+            default=DEFAULT_MODEL_LIST,
             description="One curated image model per line: model-id | Friendly name. Commas are also accepted.",
-        )
-        LUMENFALL_API_KEY: str = Field(
-            default="",
-            description="Lumenfall API key. UI masking is not encryption at rest.",
-            json_schema_extra={"input": {"type": "password"}},
         )
         DEFAULT_SIZE: str = Field(
             default="",
@@ -379,7 +458,7 @@ class Pipe:
 
     def __init__(self):
         self.valves = self.Valves()
-        self._key_provider_factory: Callable[[Any], KeyProvider] = ValveKeyProvider
+        self._key_provider_factory: Callable[[Any], KeyProvider] = SecretFileKeyProvider
         self._persistence: PersistenceAdapter = OpenWebUIPublicFileAdapter()
         self._transport: httpx.AsyncBaseTransport | None = None
 
@@ -408,6 +487,7 @@ class Pipe:
 
         entries = parse_model_list(self.valves.MODEL_LIST)
         model = selected_model_id(str(body.get("model") or ""), entries)
+        model_name = next(entry.display_name for entry in entries if entry.model_id == model)
         prompt = extract_prompt(body, __metadata__)
         client = LumenfallClient(
             key_provider=self._key_provider_factory(self.valves),
@@ -435,7 +515,7 @@ class Pipe:
                     )
                 )
             await __event_emitter__({"type": "files", "data": {"files": files}})
-            summary = _status_summary(result.metadata)
+            summary = _status_summary(model_name, result.metadata)
             await __event_emitter__(
                 {"type": "status", "data": {"description": summary, "done": True}}
             )
