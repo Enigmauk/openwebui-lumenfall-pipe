@@ -39,6 +39,7 @@ the first paid generation is deliberately deferred to Stage 3.
 - `INSTALL.md` — later reviewed installation/update/rollback procedure.
 - `TESTING.md` — automated and future integration checks.
 - `STAGE1_REPORT.md` — sanitized live audit and persistence-spike evidence.
+- `STAGE2_REPORT.md` — production deployment, mock persistence, and dry-run evidence.
 
 ## Curated model configuration
 

@@ -16,7 +16,7 @@ For the current Docker deployment, copy the repository to a temporary container
 path, run the command there, and delete that temporary copy afterward. Do not
 copy it into Open WebUI's Function database or data directory for Stage 1.
 
-Current Stage 1 result: **34 tests passed** inside the exact `v0.11.3` image.
+Current Stage 2 result: **39 tests passed** inside the exact `v0.11.3` image.
 
 Coverage includes:
 
@@ -64,3 +64,19 @@ Lumenfall request.
 - deleting a test chat/file follows expected Open WebUI semantics;
 - timeout and every normalized provider error render cleanly;
 - server logs contain no key, Authorization header, base64, or full prompt.
+
+## Stage 2 production result
+
+The disabled-first production import matched the Git source SHA-256 exactly.
+A separately named temporary Pipe used the same persistence boundary with an
+in-memory `httpx.MockTransport` and a 1×1 PNG. The current user's file was
+stored through the public API, attached to the assistant message, survived a
+reload, and was absent from message/chat JSON as base64. Unauthenticated file
+access returned 401. The installation had no second ordinary user, so a true
+cross-user denial could not be exercised without creating an unrelated account;
+that result remains covered by the public route's access-control design review.
+The temporary chat, Function, file, scripts, and import JSON were deleted.
+
+Authenticated `dryRun=true` requests succeeded for five representative models
+with no explicit size and no generation. See `STAGE2_REPORT.md` for the
+sanitized provider and estimate results.
