@@ -44,6 +44,9 @@ the first paid generation is deliberately deferred to Stage 3.
   no-network prototype findings; not deployed.
 - `VIDEO_STAGE2_ARCHITECTURE.md` — development-only durable worker, state,
   idempotency, recovery, and user-owned persistence design; not deployed.
+- `video_worker/` — Checkpoint C SQLite worker skeleton, authenticated internal
+  API, encrypted pending state, and fake-only lifecycle collaborators; not
+  configured or deployed.
 
 ## Curated model configuration
 

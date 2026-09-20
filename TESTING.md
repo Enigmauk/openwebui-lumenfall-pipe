@@ -16,7 +16,9 @@ For the current Docker deployment, copy the repository to a temporary container
 path, run the command there, and delete that temporary copy afterward. Do not
 copy it into Open WebUI's Function database or data directory for Stage 1.
 
-Current Stage 2 result: **39 tests passed** inside the exact `v0.11.3` image.
+Current Lumenfall Video Stage 2 Checkpoint C result: **72 tests passed** inside
+the exact `v0.11.3` image with container networking disabled: all 54 prior image
+and video-prototype tests plus 18 durable-worker tests.
 
 Coverage includes:
 
@@ -36,6 +38,18 @@ Coverage includes:
 - selector availability when Lumenfall is unreachable.
 - the 14-entry Stage 2 default catalogue and fixed secret-file provider;
 - authenticated dry-run query construction and estimate validation.
+- durable SQLite job creation and persistence across worker reconstruction;
+- idempotency-key persistence before the one allowed submit attempt;
+- duplicate logical intent reuse and changed-intent conflict handling;
+- ambiguous-submit fail-closed recovery without a second submit;
+- queued, in-progress, completed, failed, transient-poll and cancellation paths;
+- restart after submit, during polling, and before mock persistence;
+- encrypted prompt/session material and credential-refresh delivery recovery;
+- authenticated health/job routes and cross-user job isolation.
+
+The Checkpoint C worker tests use only deterministic fake video and persistence
+backends. The test container uses `--network none`; no Lumenfall endpoint,
+production secret, production Open WebUI API, or paid generation is reachable.
 
 ## Stage 1 live synthetic persistence proof
 
