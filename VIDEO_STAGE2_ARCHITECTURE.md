@@ -1,0 +1,208 @@
+# Lumenfall Video Stage 2 — worker architecture
+
+Status: Checkpoint B design, development-only. No worker, video Pipe, or video
+Function has been deployed or imported. No production configuration was
+changed, and no Lumenfall video request was made.
+
+## Scope and boundary
+
+The intended flow is:
+
+1. The authenticated Open WebUI Pipe validates the selected `video:<model>`
+   entry and rejects internal `__task__` calls before invoking the worker.
+2. The Pipe sends one request to a small local worker over a private Docker
+   connection, with a dedicated worker Bearer secret and the current user's
+   session credential. The Lumenfall key is never sent to the Pipe.
+3. The worker writes a durable SQLite job record before contacting Lumenfall.
+   It owns the one initial submit attempt, polling, download, recovery, and
+   persistence bookkeeping.
+4. Once complete, the worker uses the originating user's credential against
+   Open WebUI's public chat and file APIs. The video is stored as a normal
+   user-owned file and attached to the originating assistant message.
+5. The Pipe can later retrieve state by local job ID. The worker never returns
+   a temporary Lumenfall URL as the durable result.
+
+This remains a design for a later separately approved deployment. The worker
+port must not be published on the host or routed through Cloudflare. Only the
+Pipe should be configured as an API caller; internal network location alone is
+not authorization. The worker API requires a dedicated secret distinct from
+the Lumenfall key. Any later Compose/network changes require separate review.
+
+## Narrow worker API
+
+The small internal interface is:
+
+- `GET /health` — authenticated liveness and SQLite availability only; no job
+  information.
+- `POST /jobs` — validate one selected model and a saved chat/message, durably
+  create or return the logical job, then schedule its single initial submit.
+- `GET /jobs/{local_job_id}` — return sanitized state only when the caller's
+  verified Open WebUI user ID owns the job.
+- `DELETE /jobs/{local_job_id}` — record a cancellation request for an owned
+  job; any upstream DELETE is best effort.
+- `POST /jobs/{local_job_id}/delivery-credential` — optionally replace an
+  expired/invalid current-user credential after the Pipe re-authenticates the
+  owner. This does not submit or resubmit a Lumenfall job.
+
+All routes require the separate worker Bearer secret. The Pipe supplies the
+owner ID from Open WebUI's authenticated request context; clients cannot set an
+arbitrary owner through Pipe inputs. Every read, cancel, or credential refresh
+also checks the local job's owner ID. Job IDs are random opaque UUIDs, not
+authorization tokens. The worker uses fixed Open WebUI and Lumenfall service
+origins; callers cannot provide a URL, filesystem path, Lumenfall key, or
+provider endpoint.
+
+## Durable state model
+
+Use one SQLite row per logical job, with a uniqueness constraint on
+`(owner_user_id, chat_id, assistant_message_id)`. A repeated request for that
+same assistant message returns its existing job if its canonical request
+fingerprint matches; a different request for the same message is a conflict.
+A genuinely new assistant message is a new user intent.
+
+Minimum columns:
+
+| Group | Stored fields |
+| --- | --- |
+| Identity | local job UUID; owner user ID; chat ID; assistant message ID; selected friendly ID; upstream model ID |
+| Request safety | creation/update timestamps; HMAC request fingerprint; Lumenfall idempotency key; submit state/attempt timestamp; encrypted prompt/request only before the one submit attempt is resolved |
+| Upstream lifecycle | Lumenfall job ID; last provider state; worker state; poll count; next poll time; sanitized error category; cancellation-requested flag |
+| Result | provider; executed model; final cost and currency; MIME; expected and downloaded byte counts; worker-relative artifact path; final Open WebUI file ID; completion timestamp |
+| Ownership continuation | encrypted current-user session credential and local expiry time, if needed for unattended delivery |
+
+The prompt is encrypted while a new job is waiting to submit. Once Lumenfall
+accepts it, the prompt ciphertext is erased; it is not needed to poll or deliver
+the result. If submission becomes ambiguous, erase the prompt too and retain
+only the random idempotency key and keyed request fingerprint for reconciliation.
+Never log prompts, bearer values, media bytes, raw upstream bodies, or raw
+authorization headers. Store only sanitized error categories and documented
+provider/cost metadata.
+
+Use parameterized SQL, explicit transactions, a uniqueness constraint, and a
+local persistent volume for the database. Commit the idempotency key, encrypted
+pending request, and `submitting` state before the network POST. Store media in
+a private worker data directory, never a web-served path. Use restrictive
+directory/file permissions and an atomic `.part`-to-final rename after media
+validation. No Open WebUI or Lumenfall database is accessed directly.
+
+## State machine and submission idempotency
+
+The minimal local states are:
+
+```text
+pending_submit -> submitting -> queued -> in_progress
+                                  |            |
+                                  +------------+-> downloading -> persisting -> completed
+                                                  \-> failed
+
+submitting -> submit_ambiguous
+queued/in_progress -> cancel_requested -> (continue observing until terminal)
+downloading/persisting -> delivery_auth_required (local artifact/job is retained)
+```
+
+`failed`, `completed`, and `submit_ambiguous` do not re-enter submission.
+Cancellation is a request, not proof of cancellation or refund; continue to
+observe the known job where possible. The public video API documents the
+`idempotency_key` body field and says sending the same key twice returns the
+existing video. It does not publish a deduplication-retention window or
+key/payload-conflict semantics. Therefore this worker makes one initial POST,
+does not automatically retry an ambiguous POST, and never creates a new key
+for a retry. This is intentionally conservative. A crash after committing
+`submitting` but before the response is durably recorded becomes
+`submit_ambiguous` on recovery; an operator must reconcile it rather than risk
+a duplicate paid job. Once the upstream ID is stored, GET polling may be retried
+with bounded backoff because it does not create a generation.
+
+Before the POST, generate and commit one stable Lumenfall idempotency key. The
+key belongs only to that local logical job and its immutable request. Repeated
+Pipe calls for the same assistant message/fingerprint reuse the local job;
+they do not dispatch another POST. No external retry middleware is permitted
+around the create request.
+
+## Restart and failure recovery
+
+- A committed `pending_submit` job may be claimed once. A committed
+  `submitting` job with no recorded upstream ID becomes `submit_ambiguous`;
+  it is never automatically posted again.
+- Rows with a known Lumenfall ID in `queued` or `in_progress` resume polling at
+  their persisted `next_poll_at`. The 15-minute Pipe observation window does
+  not delete, cancel, or resubmit the remote job; status remains recoverable.
+- Terminal upstream `failed` and local `completed` rows remain terminal.
+- A crash during download discards an incomplete `.part` file and retries the
+  idempotent GET while the documented output URL is valid. A complete verified
+  local artifact is kept for persistence recovery.
+- Open WebUI upload has no documented idempotency-key field. Use the public
+  `GET /api/v1/files/search` with a job-specific deterministic filename to find
+  an upload that committed before a lost response. If the result is still
+  ambiguous, preserve `persisting`/`delivery_auth_required` and do not
+  blindly duplicate the upload.
+- Before emitting a `files` event again, read the saved chat through the public
+  chat API and check whether that file ID is already present on the target
+  assistant message. After the event, verify the same public chat response
+  contains the file ID before marking the local job `completed`.
+- Poll retries, upload reconciliation, event reconciliation, and cancellation
+  never change the Lumenfall idempotency key or call the create endpoint again.
+- A worker restart scans active rows from SQLite; it does not rely on an
+  in-memory task surviving. Failed or completed jobs are not restarted.
+
+If a poll retry budget is exhausted, retain the known upstream ID and an
+interrupted/poll-retry state for later bounded recovery. Do not classify a
+temporary connectivity problem as a provider failure and do not resubmit.
+
+## Open WebUI ownership and credential handling
+
+The worker uses the current user's session JWT captured from the authenticated
+Pipe invocation, not a permanent service/admin token and not an API key. The
+Pipe may normalize the current `Authorization: Bearer` credential or the
+`token` value of the current session cookie into that one JWT value; it never
+passes or stores a whole `Cookie` header. The worker uses the credential only
+with fixed, public Open WebUI routes:
+
+1. Before paid submission, `GET /api/v1/chats/{chat_id}` must confirm that the
+   current user can access the saved chat. Temporary/unsaved or non-owned chats
+   fail closed before Lumenfall is contacted.
+2. `POST /api/v1/files/?process=false` uploads the completed local bytes under
+   that same session. The response must match the expected MIME, size, and
+   current user owner before its file ID is recorded.
+3. `GET /api/v1/files/search?filename=...&content=false` reconciles an upload
+   whose response was lost, without database access.
+4. `POST /api/v1/chats/{chat_id}/messages/{message_id}/event` emits the public
+   persistent `files` event. Open WebUI `v0.11.3` verifies the caller and chat
+   owner on this route. A public chat read verifies persisted attachment state
+   before and after the event so recovery does not append duplicates.
+
+At-rest bearer custody is a limited compromise required for a disconnected
+browser: encrypt the single current-user credential with authenticated
+encryption (AES-GCM) under a separate future worker secret, bind ciphertext to
+the local job/owner as associated data, never store it as plaintext, and never
+store a whole Cookie header. Proposed hard retention is six hours or until
+terminal delivery, whichever comes first; an invalid/expired credential is
+deleted immediately. A status call from the same owner may provide a fresh
+current-user credential through the dedicated refresh route. If no valid
+credential is available when delivery is ready, keep the protected artifact
+and report `delivery_auth_required` for up to 24 hours; do not lose the known
+video job or create another one. Delete the credential immediately after
+delivery or terminal failure. This bounded lease and the refresh path must be
+exercised in mock tests before any later deployment decision.
+
+The worker never accepts a user ID as sufficient proof to upload as that user:
+it uses the user-scoped Open WebUI credential for every file/chat operation,
+and Open WebUI enforces file ownership and chat-owner access. The worker's
+internal bearer secret restricts which local service can ask it to act. No
+credentials are created, placed in Valves, or installed during Checkpoint B.
+
+## First-party source references
+
+- [Lumenfall video generation API](https://docs.lumenfall.ai/api-reference/videos/generate), [status](https://docs.lumenfall.ai/api-reference/videos/get), and [cancel](https://docs.lumenfall.ai/api-reference/videos/cancel) references.
+- Pinned Open WebUI `v0.11.3` [file routes](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/routers/files.py), [chat event route](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/routers/chats.py), [auth helper](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/utils/auth.py), and [persistent event emitter](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/socket/main.py).
+
+## Current gates and implementation boundary
+
+Checkpoint A found that Cloudflare returns HTTP 403 for the documented
+read-only account and dry-run endpoints before a Lumenfall API JSON response;
+the underlying cause and production Replay setting remain unverified. This
+blocks authenticated Lumenfall API tests, not mock-only implementation. Stages
+C–E and G must use only fake credentials/transports. Checkpoint F must remain
+skipped until the 403 and account controls are resolved. No production video
+Function import, worker Compose service, public port, Cloudflare route, paid
+generation, or production image change is part of this design checkpoint.

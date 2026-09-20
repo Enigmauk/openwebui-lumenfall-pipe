@@ -42,6 +42,8 @@ the first paid generation is deliberately deferred to Stage 3.
 - `STAGE2_REPORT.md` — production deployment, mock persistence, and dry-run evidence.
 - `VIDEO_STAGE1_REPORT.md` — development-only video API/lifecycle research and
   no-network prototype findings; not deployed.
+- `VIDEO_STAGE2_ARCHITECTURE.md` — development-only durable worker, state,
+  idempotency, recovery, and user-owned persistence design; not deployed.
 
 ## Curated model configuration
 
