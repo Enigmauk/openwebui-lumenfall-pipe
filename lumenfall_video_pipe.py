@@ -33,7 +33,7 @@ _JOB_STATES = {
     "delivery_auth_required", "cancel_requested", "failed", "completed",
 }
 _UPSTREAM_STATES = {"queued", "in_progress", "completed", "failed"}
-_SAFE_CODE = re.compile(r"^[A-Z0-9_]{1,64}$")
+_SAFE_CODE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 

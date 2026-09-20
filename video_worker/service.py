@@ -317,6 +317,24 @@ class WorkerService:
             return None
         if job.worker_state in TERMINAL_STATES:
             return job
+        if job.worker_state is WorkerState.PENDING_SUBMIT:
+            return self.store.transition(
+                job_id, WorkerState.FAILED, cancel_requested=True,
+                request_ciphertext=None, credential_ciphertext=None,
+                credential_expires_at=None,
+                last_safe_error="CANCELLED_BEFORE_SUBMIT",
+            )
+        if job.worker_state is WorkerState.SUBMITTING:
+            # The POST outcome is not known yet. Preserve the cancellation
+            # intent so the first known-ID poll can issue best-effort DELETE.
+            return self.store.transition(
+                job_id, WorkerState.SUBMITTING, cancel_requested=True,
+            )
+        if job.worker_state not in {
+            WorkerState.QUEUED, WorkerState.IN_PROGRESS,
+            WorkerState.POLL_INTERRUPTED, WorkerState.CANCEL_REQUESTED,
+        }:
+            return job
         return self.store.transition(
             job_id, WorkerState.CANCEL_REQUESTED, cancel_requested=True
         )
@@ -326,11 +344,11 @@ class WorkerService:
         job = self.store.get(job_id, owner_user_id)
         if not job:
             return None
+        if job.worker_state is not WorkerState.DELIVERY_AUTH_REQUIRED:
+            return job
         context = self.context(job.owner_user_id, job.chat_id, job.assistant_message_id)
-        state = (WorkerState.PERSISTING if job.worker_state is WorkerState.DELIVERY_AUTH_REQUIRED
-                 else job.worker_state)
         return self.store.transition(
-            job_id, state,
+            job_id, WorkerState.PERSISTING,
             credential_ciphertext=self.secret_box.encrypt(credential.encode(), context=context),
             credential_expires_at=time.time() + self.CREDENTIAL_TTL,
             last_safe_error=None,

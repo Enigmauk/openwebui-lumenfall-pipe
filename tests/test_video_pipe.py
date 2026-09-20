@@ -454,13 +454,13 @@ class VideoPipeWorkerIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_provider_failure_returns_safe_terminal_status(self):
         service, backend, _, _, app, _ = self.make_worker()
-        backend.set_results("video_1", UpstreamJob("video_1", "failed", error_code="MOCK_PROVIDER_FAILED"))
+        backend.set_results("video_1", UpstreamJob("video_1", "failed", error_code="provider.failed-v2"))
         pipe, _, _ = self.make_pipe(app, service)
         context = self.request_context()
         result = await pipe.pipe(self.body(), __user__=context["user"],
                                  __metadata__=context["metadata"], __message_id__=MESSAGE,
                                  __request__=context["request"], __event_emitter__=_event_sink)
-        self.assertIn("MOCK_PROVIDER_FAILED", result)
+        self.assertIn("provider.failed-v2", result)
         self.assertEqual(backend.submit_calls, 1)
 
     async def test_result_download_failure_is_durable_and_never_exposes_url(self):

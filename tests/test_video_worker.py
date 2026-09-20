@@ -194,6 +194,38 @@ class LifecycleTests(WorkerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed.worker_state, WorkerState.IN_PROGRESS)
         self.assertEqual(self.backend.cancel_calls, 1)
 
+    async def test_cancel_before_submit_is_terminal_without_provider_call(self):
+        job, _ = self.create()
+        cancelled = await self.service.request_cancel(job.job_id, "user-1")
+        self.assertEqual(cancelled.worker_state, WorkerState.FAILED)
+        self.assertEqual(cancelled.last_safe_error, "CANCELLED_BEFORE_SUBMIT")
+        self.assertTrue(cancelled.cancel_requested)
+        self.assertIsNone(cancelled.request_ciphertext)
+        self.assertIsNone(cancelled.credential_ciphertext)
+        await self.service.advance(job.job_id)
+        self.assertEqual(self.backend.submit_calls, 0)
+
+    async def test_cancel_during_submit_preserves_intent(self):
+        job, _ = self.create()
+        claimed = self.store.claim_submission(job.job_id)
+        self.assertEqual(claimed.worker_state, WorkerState.SUBMITTING)
+        observed = await self.service.request_cancel(job.job_id, "user-1")
+        self.assertEqual(observed.worker_state, WorkerState.SUBMITTING)
+        self.assertTrue(observed.cancel_requested)
+
+    async def test_cancel_after_result_download_keeps_recoverable_state(self):
+        job, _ = self.create()
+        await self.service.advance(job.job_id)
+        self.backend.set_results(
+            "video_1",
+            UpstreamJob("video_1", "completed", output_mime="video/mp4", output_bytes=MP4),
+        )
+        downloading = await self.service.advance(job.job_id)
+        observed = await self.service.request_cancel(job.job_id, "user-1")
+        self.assertEqual(observed.worker_state, WorkerState.DOWNLOADING)
+        self.assertEqual(observed.artifact_path, downloading.artifact_path)
+        self.assertFalse(observed.cancel_requested)
+
     async def test_delivery_auth_failure_preserves_result_for_refresh(self):
         self.persistence.fail_auth = True
         job, _ = self.create()
@@ -209,6 +241,19 @@ class LifecycleTests(WorkerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed.worker_state, WorkerState.PERSISTING)
         final = await self.service.run_until_stable(job.job_id)
         self.assertEqual(final.worker_state, WorkerState.COMPLETED)
+
+    async def test_terminal_job_rejects_credential_retention(self):
+        self.backend.submit_error = RuntimeError("mock rejection")
+        job, _ = self.create()
+        failed = await self.service.advance(job.job_id)
+        self.assertEqual(failed.worker_state, WorkerState.FAILED)
+        self.assertIsNone(failed.credential_ciphertext)
+        unchanged = self.service.refresh_credential(
+            job.job_id, "user-1", "fresh-fake-jwt-that-must-not-be-stored"
+        )
+        self.assertEqual(unchanged.worker_state, WorkerState.FAILED)
+        self.assertIsNone(unchanged.credential_ciphertext)
+        self.assertIsNone(unchanged.credential_expires_at)
 
 
 class ApiTests(WorkerFixture, unittest.IsolatedAsyncioTestCase):
