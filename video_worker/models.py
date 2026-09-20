@@ -11,6 +11,10 @@ class AmbiguousSubmit(ConnectionError):
     """The create request may have reached the provider; never retry it automatically."""
 
 
+class PermanentVideoError(ValueError):
+    """A sanitized, non-retryable provider or response validation failure."""
+
+
 class WorkerState(str, Enum):
     PENDING_SUBMIT = "pending_submit"
     SUBMITTING = "submitting"
@@ -99,3 +103,5 @@ class UpstreamJob:
     output_mime: str | None = None
     output_bytes: bytes | None = None
     error_code: str | None = None
+    output_url: str | None = None
+    expected_bytes: int | None = None

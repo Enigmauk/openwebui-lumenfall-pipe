@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Protocol
 
 from .db import JobStore
-from .models import AmbiguousSubmit, JobRecord, TERMINAL_STATES, UpstreamJob, WorkerState
+from .models import (
+    AmbiguousSubmit, JobRecord, PermanentVideoError, TERMINAL_STATES,
+    UpstreamJob, WorkerState,
+)
 from .security import SecretBox, canonical_request, new_idempotency_key, request_fingerprint
 
 
@@ -25,12 +28,18 @@ class Persistence(Protocol):
                       credential: str) -> str: ...
 
 
+class ResultDownloader(Protocol):
+    async def download(self, *, job_id: str, url: str, mime: str,
+                       expected_bytes: int | None = None): ...
+
+
 class WorkerService:
     CREDENTIAL_TTL = 6 * 60 * 60
 
     def __init__(self, store: JobStore, backend: VideoBackend, persistence: Persistence,
                  secret_box: SecretBox, fingerprint_key: bytes,
-                 artifact_directory: str | Path | None = None):
+                 artifact_directory: str | Path | None = None,
+                 downloader: ResultDownloader | None = None):
         self.store = store
         self.backend = backend
         self.persistence = persistence
@@ -39,6 +48,7 @@ class WorkerService:
         default_directory = Path(store.path).parent / "artifacts"
         self.artifact_directory = Path(artifact_directory or default_directory)
         self.artifact_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.downloader = downloader
 
     @staticmethod
     def context(owner: str, chat: str, message: str) -> str:
@@ -107,6 +117,13 @@ class WorkerService:
                 credential_ciphertext=None, credential_expires_at=None,
                 last_safe_error="SUBMIT_REJECTED",
             )
+        if (not isinstance(upstream, UpstreamJob) or not upstream.job_id
+                or upstream.state not in {"queued", "in_progress"}):
+            return self.store.transition(
+                job_id, WorkerState.SUBMIT_AMBIGUOUS, request_ciphertext=None,
+                credential_ciphertext=None, credential_expires_at=None,
+                last_safe_error="SUBMIT_OUTCOME_UNKNOWN",
+            )
         state = WorkerState.QUEUED if upstream.state == "queued" else WorkerState.IN_PROGRESS
         return self.store.transition(
             job_id, state, upstream_job_id=upstream.job_id,
@@ -126,6 +143,19 @@ class WorkerService:
                 job.job_id, WorkerState.POLL_INTERRUPTED,
                 poll_count=job.poll_count + 1, last_safe_error="POLL_TRANSIENT",
             )
+        except PermanentVideoError:
+            return self.store.transition(
+                job.job_id, WorkerState.FAILED, poll_count=job.poll_count + 1,
+                last_safe_error="INVALID_UPSTREAM_RESPONSE",
+                credential_ciphertext=None, credential_expires_at=None,
+            )
+        if (not isinstance(upstream, UpstreamJob) or upstream.job_id != job.upstream_job_id
+                or upstream.state not in {"queued", "in_progress", "completed", "failed"}):
+            return self.store.transition(
+                job.job_id, WorkerState.FAILED, poll_count=job.poll_count + 1,
+                last_safe_error="INVALID_UPSTREAM_RESPONSE",
+                credential_ciphertext=None, credential_expires_at=None,
+            )
         common = {
             "upstream_state": upstream.state,
             "poll_count": job.poll_count + 1,
@@ -139,6 +169,35 @@ class WorkerService:
                 credential_ciphertext=None, credential_expires_at=None,
             )
         if upstream.state == "completed":
+            if upstream.output_url and self.downloader:
+                if upstream.output_mime not in {"video/mp4", "video/webm"}:
+                    return self.store.transition(
+                        job.job_id, WorkerState.FAILED, **common,
+                        last_safe_error="INVALID_OUTPUT", credential_ciphertext=None,
+                        credential_expires_at=None,
+                    )
+                try:
+                    artifact = await self.downloader.download(
+                        job_id=job.job_id, url=upstream.output_url,
+                        mime=upstream.output_mime,
+                        expected_bytes=upstream.expected_bytes,
+                    )
+                except PermanentVideoError:
+                    return self.store.transition(
+                        job.job_id, WorkerState.FAILED, **common,
+                        last_safe_error="RESULT_DOWNLOAD_REJECTED",
+                        credential_ciphertext=None, credential_expires_at=None,
+                    )
+                return self.store.transition(
+                    job.job_id, WorkerState.DOWNLOADING, **common,
+                    last_safe_error=None,
+                    final_cost_micros=upstream.cost_micros,
+                    cost_currency=upstream.cost_currency,
+                    output_mime=upstream.output_mime,
+                    expected_bytes=upstream.expected_bytes,
+                    downloaded_bytes=artifact.actual_bytes,
+                    artifact_path=artifact.artifact_path,
+                )
             if not upstream.output_bytes or upstream.output_mime not in {"video/mp4", "video/webm"}:
                 return self.store.transition(
                     job.job_id, WorkerState.FAILED, **common,
@@ -180,7 +239,14 @@ class WorkerService:
             )
         credential = self.secret_box.decrypt(job.credential_ciphertext, context=context).decode()
         try:
+            allowed_artifacts = {
+                f"{job.job_id}.video", f"{job.job_id}.mp4", f"{job.job_id}.webm",
+            }
+            if not job.artifact_path or job.artifact_path not in allowed_artifacts:
+                raise OSError("Invalid protected artifact location.")
             artifact = self.artifact_directory / job.artifact_path
+            if artifact.is_symlink() or not artifact.is_file():
+                raise OSError("Invalid protected artifact location.")
             file_id = await self.persistence.persist(
                 job_id=job.job_id, content=artifact.read_bytes(),
                 mime=job.output_mime, credential=credential,

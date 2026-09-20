@@ -1,8 +1,10 @@
 # Lumenfall Video Stage 2 — worker architecture
 
-Status: Checkpoint B design, development-only. No worker, video Pipe, or video
-Function has been deployed or imported. No production configuration was
-changed, and no Lumenfall video request was made.
+Status: Checkpoints B and C are implemented; Checkpoint E has a mock-validated
+HTTP client and result downloader, development-only. No worker, video Pipe, or
+video Function has been deployed or imported. No production configuration was
+changed, and no runtime Lumenfall video request was made. Checkpoint D remains
+partially verified and incomplete.
 
 ## Scope and boundary
 
@@ -195,6 +197,49 @@ credentials are created, placed in Valves, or installed during Checkpoint B.
 
 - [Lumenfall video generation API](https://docs.lumenfall.ai/api-reference/videos/generate), [status](https://docs.lumenfall.ai/api-reference/videos/get), and [cancel](https://docs.lumenfall.ai/api-reference/videos/cancel) references.
 - Pinned Open WebUI `v0.11.3` [file routes](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/routers/files.py), [chat event route](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/routers/chats.py), [auth helper](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/utils/auth.py), and [persistent event emitter](https://github.com/open-webui/open-webui/blob/v0.11.3/backend/open_webui/socket/main.py).
+
+## Checkpoint E implementation boundary
+
+`video_worker/lumenfall_http.py` implements the existing `VideoBackend`
+interface with the fixed `https://api.lumenfall.ai` origin. The key comes only
+from an injected key provider. Create uses the stored idempotency key and one
+POST attempt; ambiguous transport outcomes and unusable 202 responses become
+`submit_ambiguous`. Poll GET has three bounded attempts for transient failures,
+strictly validates IDs/states/result metadata, and retains the known upstream
+ID. DELETE is one best-effort request and does not claim cancellation or refund.
+The explicit `create_http_worker_service` factory in
+`video_worker/integrations.py` wires this client and the downloader without
+changing the worker's deterministic fake defaults.
+
+`video_worker/downloader.py` uses an injected transport and DNS resolver for
+tests. It allows HTTPS URLs without userinfo, checks every literal or resolved
+destination address for global routability before each request, rejects mixed
+safe/unsafe DNS answers, and manually validates each redirect (maximum three).
+It streams at most 256 MiB into a mode-`0600` `.part` file under a mode-`0700`
+worker artifact directory. It checks declared and actual size, expected and
+HTTP MIME, and MP4 `ftyp` or WebM EBML signature evidence before an atomic
+rename. Failed downloads remove the partial file. The stored result contains
+only sanitized provider/model/cost/MIME/size fields and a deterministic
+worker-relative artifact name; the expiring output URL is never written to
+SQLite. HTTPX request log URLs are redacted, and raised errors use fixed safe
+categories.
+
+The standard HTTP connector resolves a hostname again when opening the socket,
+after the downloader's DNS validation. DNS validation is therefore not pinned
+to the actual connection and a DNS-rebinding/TOCTOU window remains. Redirects
+are independently revalidated, but this implementation does not claim to
+eliminate that window. A future deployment review should decide whether a
+connection-pinned transport is required for the threat model.
+
+Checkpoint E validation ran all 98 tests (the prior 72 plus 26 new tests) in
+the pinned Open WebUI `v0.11.3` image, with `--network none`, a read-only source
+mount, mocked HTTP transports, and injected DNS resolvers. No authenticated
+Lumenfall request, production key read, real DNS lookup, or real HTTP request
+was part of the tests. Checkpoint D remains incomplete: uploaded-file
+durability and cleanup were verified, while chat attachment rendering/history
+reload and exact persisted representation/base64 absence remain unverified.
+The HTTP 403 and Replay configuration are unresolved; Checkpoint F remains
+blocked.
 
 ## Current gates and implementation boundary
 
