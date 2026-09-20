@@ -40,6 +40,8 @@ the first paid generation is deliberately deferred to Stage 3.
 - `TESTING.md` — automated and future integration checks.
 - `STAGE1_REPORT.md` — sanitized live audit and persistence-spike evidence.
 - `STAGE2_REPORT.md` — production deployment, mock persistence, and dry-run evidence.
+- `VIDEO_STAGE1_REPORT.md` — development-only video API/lifecycle research and
+  no-network prototype findings; not deployed.
 
 ## Curated model configuration
 
