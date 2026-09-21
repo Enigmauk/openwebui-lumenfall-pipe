@@ -121,11 +121,12 @@ the requested and returned model, provider, exact integer cost, currency,
 request payload and any recognized effective/default parameters returned by
 Lumenfall.
 
-When video settings are omitted, the result states that model defaults were
-used and the prices may not be directly comparable. Explicit settings are sent
-unchanged to every requested model. A model-specific rejection remains that
-model's error; the Tool never substitutes another duration, size, resolution or
-aspect ratio.
+Video results track duration and dimensions as independent default groups. A
+request with explicit seconds but no size/resolution/aspect ratio still reports
+that dimensions use model defaults and the prices may not be directly
+comparable. Explicit settings are sent unchanged to every requested model. A
+model-specific rejection remains that model's error; the Tool never substitutes
+another duration, size, resolution or aspect ratio.
 
 ## Future exact Pipe command
 

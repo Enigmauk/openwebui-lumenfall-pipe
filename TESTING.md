@@ -10,7 +10,7 @@ unconfirmed estimates, unexpected execution/media payloads, sanitized HTTP and
 transport failures, missing keys, exact integer micros, prompt/context
 isolation, and proof that the estimator exposes no generation/fallback method.
 
-On 2026-09-21 the complete suite passed **148/148** in the exact pinned
+On 2026-09-21 the complete suite passed **149/149** in the exact pinned
 Open WebUI image with `--network none`, a read-only source mount and mocked HTTP
 for every automated test.
 
@@ -23,6 +23,8 @@ for Seedream 5 Lite (35,000 micros), Qwen Image 2512 (20,000 micros), and
 FLUX.2 Max (70,000 micros). Three explicit five-second video dry runs returned
 confirmed estimates for P-Video (100,000 micros), Wan 2.6 (500,000 micros), and
 Seedance 2.0 (1,517,000 micros). All currencies were USD.
+Duration was controlled, while dimensions were omitted and therefore remained
+model defaults; these video prices are not fully apples-to-apples.
 
 No response contained job, execution, output or media fields. No poll, download,
 generation, production import or configuration change occurred. Temporary

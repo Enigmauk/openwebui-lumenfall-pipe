@@ -121,6 +121,18 @@ class SingleEstimateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["provider"], "test-provider")
         self.assertEqual(result["effective_parameters"], {"seconds": 5, "resolution": "720p"})
         self.assertEqual(result["formatted_cost"], "$0.10")
+        self.assertFalse(result["uses_model_defaults"])
+        self.assertEqual(result["defaulted_parameters"], [])
+
+    async def test_video_seconds_only_marks_dimensions_as_model_defaults(self):
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, json=estimate_payload("p-video"))
+        )
+        estimator = DryRunEstimator(key_provider=StaticKeyProvider(), transport=transport)
+        result = await estimator.estimate_video(VideoRequestSpec("p-video", "prompt", seconds=5))
+        structured = result.to_dict()
+        self.assertTrue(structured["uses_model_defaults"])
+        self.assertEqual(structured["defaulted_parameters"], ["dimensions"])
 
     async def test_video_omitted_options_are_marked_as_model_defaults(self):
         transport = httpx.MockTransport(
@@ -130,6 +142,7 @@ class SingleEstimateTests(unittest.IsolatedAsyncioTestCase):
         result = await estimator.estimate_video(VideoRequestSpec("p-video", "prompt"))
         structured = result.to_dict()
         self.assertTrue(structured["uses_model_defaults"])
+        self.assertEqual(structured["defaulted_parameters"], ["seconds", "dimensions"])
         self.assertIn("may not be directly comparable", structured["comparison_note"])
 
 
@@ -159,6 +172,7 @@ class ComparisonTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([item["requested_model"] for item in result["results"]], ["model-a", "model-b"])
         self.assertTrue(all(item["request"]["seconds"] == 5 for item in result["results"]))
+        self.assertTrue(all(not item["uses_model_defaults"] for item in result["results"]))
 
     async def test_model_count_limit_is_enforced_before_http(self):
         calls = 0

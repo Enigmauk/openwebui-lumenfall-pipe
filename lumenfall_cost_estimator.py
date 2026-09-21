@@ -211,6 +211,7 @@ class CostEstimate:
     effective_parameters: dict[str, Any]
     components: list[dict[str, Any]]
     uses_model_defaults: bool
+    defaulted_parameters: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -225,8 +226,9 @@ class CostEstimate:
             "effective_parameters": self.effective_parameters,
             "components": self.components,
             "uses_model_defaults": self.uses_model_defaults,
+            "defaulted_parameters": list(self.defaulted_parameters),
             "comparison_note": (
-                "Optional settings were omitted, so this estimate uses model defaults and may not be directly comparable."
+                "One or more optional settings were omitted, so this estimate uses model defaults and may not be directly comparable."
                 if self.uses_model_defaults
                 else None
             ),
@@ -282,7 +284,7 @@ def parse_estimate_response(
     *,
     requested_model: str,
     request: dict[str, Any],
-    optional_parameter_names: tuple[str, ...],
+    optional_parameter_groups: tuple[tuple[str, tuple[str, ...]], ...],
 ) -> CostEstimate:
     if not isinstance(payload, dict):
         raise EstimationError("invalid_response", "Lumenfall returned malformed estimate JSON.")
@@ -325,7 +327,11 @@ def parse_estimate_response(
         if name in payload and _safe_scalar(payload[name]):
             effective_parameters[name] = payload[name]
 
-    uses_model_defaults = not any(name in request for name in optional_parameter_names)
+    defaulted_parameters = tuple(
+        label
+        for label, names in optional_parameter_groups
+        if not any(name in request for name in names)
+    )
     return CostEstimate(
         requested_model=requested_model,
         returned_model=returned_model,
@@ -335,7 +341,8 @@ def parse_estimate_response(
         request=request,
         effective_parameters=effective_parameters,
         components=_parse_components(payload.get("components")),
-        uses_model_defaults=uses_model_defaults,
+        uses_model_defaults=bool(defaulted_parameters),
+        defaulted_parameters=defaulted_parameters,
     )
 
 
@@ -386,7 +393,7 @@ class DryRunEstimator:
             payload,
             requested_model=spec.model,
             request=request,
-            optional_parameter_names=("size",),
+            optional_parameter_groups=(("size", ("size",)),),
         )
 
     async def estimate_video(self, spec: VideoRequestSpec) -> CostEstimate:
@@ -396,7 +403,10 @@ class DryRunEstimator:
             payload,
             requested_model=spec.model,
             request=request,
-            optional_parameter_names=("seconds", "size", "resolution", "aspect_ratio"),
+            optional_parameter_groups=(
+                ("seconds", ("seconds",)),
+                ("dimensions", ("size", "resolution", "aspect_ratio")),
+            ),
         )
 
     async def _post_dry_run(self, url: str, request: dict[str, Any]) -> dict[str, Any]:

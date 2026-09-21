@@ -13,7 +13,7 @@
   response parsing, sanitized errors, and fail-closed execution/media checks.
 - Added the future exact leading `/estimate` Pipe command design without
   modifying the deployed image Pipe source.
-- Added 25 estimator tests. The complete 148-test suite passed inside the exact
+- Added 26 estimator tests. The complete 149-test suite passed inside the exact
   pinned image with networking disabled and source mounted read-only. Python
   compilation and `git diff --check` also passed.
 - Bounded authenticated validation made three image and three video dry-run
