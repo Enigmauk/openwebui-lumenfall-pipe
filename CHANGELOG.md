@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.0-estimator-source — 2026-09-21
+
+- Audited the running pinned Open WebUI `v0.11.3` Tool, Function, Action,
+  permission, Valve, import/export and server-side execution paths.
+- Added `lumenfall_cost_estimator.py`, a self-contained source-only Workspace
+  Tool with shared image/video request specifications, curated administrator
+  allowlists, exact integer-micros costs, sequential five-model comparisons and
+  per-model results.
+- Added a fixed-origin dry-run-only client with mandatory `dryRun=true`, normal
+  TLS verification, `trust_env=False`, redirects disabled, bounded timeout and
+  response parsing, sanitized errors, and fail-closed execution/media checks.
+- Added the future exact leading `/estimate` Pipe command design without
+  modifying the deployed image Pipe source.
+- Added 25 estimator tests. The complete 148-test suite passed inside the exact
+  pinned image with networking disabled and source mounted read-only. Python
+  compilation and `git diff --check` also passed.
+- Bounded authenticated validation made three image and three video dry-run
+  calls. All returned confirmed estimates with no job/media fields. Balance was
+  `$0.999` before and after. No real generation, production import, deployment,
+  Function change, worker change, Compose change or Open WebUI configuration
+  change occurred.
+
+The Workspace Tool and `/estimate` command remain undeployed source work.
+
 ## 0.1.0-stage2 — 2026-09-20
 
 - Finalized a 14-model exploratory catalogue focused on Seedream, Qwen, Wan,

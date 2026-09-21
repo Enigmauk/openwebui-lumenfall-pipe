@@ -3,6 +3,31 @@
 Tests never call Lumenfall. HTTP behavior uses `httpx.MockTransport` and tiny
 in-memory fixtures.
 
+The cost-estimator coverage includes confirmed image/video dry runs, sequential
+multi-model comparisons, five-model and curated-model enforcement, partial
+failures, explicit-option preservation, model-default reporting, malformed and
+unconfirmed estimates, unexpected execution/media payloads, sanitized HTTP and
+transport failures, missing keys, exact integer micros, prompt/context
+isolation, and proof that the estimator exposes no generation/fallback method.
+
+On 2026-09-21 the complete suite passed **148/148** in the exact pinned
+Open WebUI image with `--network none`, a read-only source mount and mocked HTTP
+for every automated test.
+
+## Bounded estimator live validation
+
+After the no-network suite passed, a disposable pinned-image container used the
+existing key mounted read-only and the new estimator source. The balance read
+was `$0.999` before and after. Three image dry runs returned confirmed estimates
+for Seedream 5 Lite (35,000 micros), Qwen Image 2512 (20,000 micros), and
+FLUX.2 Max (70,000 micros). Three explicit five-second video dry runs returned
+confirmed estimates for P-Video (100,000 micros), Wan 2.6 (500,000 micros), and
+Seedance 2.0 (1,517,000 micros). All currencies were USD.
+
+No response contained job, execution, output or media fields. No poll, download,
+generation, production import or configuration change occurred. Temporary
+validation scripts were removed.
+
 ## Automated suite
 
 Run in an environment containing the same `httpx` and `pydantic` versions as

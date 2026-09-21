@@ -6,7 +6,7 @@
 - Commit: `2a960a59fe1dbbd35282f0556b3666d81102e781`
 - Production image digest reviewed:
   `sha256:751b617714b91e4cfd0186a509c72480c858e012976103b09a30dad053c36175`
-- Review date: 2026-09-20
+- Review dates: 2026-09-20 and 2026-09-21
 
 No compatibility is claimed for any other Open WebUI version.
 
@@ -69,6 +69,31 @@ The version-sensitive boundary is limited to:
 
 Regression tests and the synthetic persistence check must cover these before an
 upgrade.
+
+### Workspace Tool and Action contract
+
+The 2026-09-21 read-only audit of the running pinned backend found:
+
+- Workspace Tool source is stored in the `tool` table, loaded with `exec()` as
+  a temporary module, and cached in the Open WebUI process.
+- Public typed `class Tools` methods become model-callable schemas. Reserved
+  parameters are removed from those schemas and injected only when explicitly
+  named by a method.
+- Tool ownership and read/write access grants are enforced when tools are
+  listed and loaded. Workspace create/import/export permissions are separately
+  checked. Tools do not have the Function active/global toggle lifecycle.
+- Admin Tool Valves and per-user UserValves persist in Open WebUI's database and
+  use the installation-wide Valve encryption behavior described below.
+- Tool calls run server-side in the same container process. The existing exact
+  read-only `/run/secrets/lumenfall-api-key` mount was readable by that process,
+  so the estimator needs no Compose change.
+- Action Functions are enabled server-side buttons tied globally or to model
+  configuration. Their action method receives message/chat context and is a
+  future convenience surface, not the narrow comparison API.
+
+The Tool source-blob lifecycle means a separately imported Function cannot
+safely depend on a live Tool module. `COST_ESTIMATION_ARCHITECTURE.md` records
+the source-sharing and future bundling boundary.
 
 ### Function dependencies and Valves
 

@@ -29,6 +29,14 @@ Compose text, logs, tests, chat history, screenshots, or exception messages.
 - Authenticated cost checks use Lumenfall's documented `dryRun=true` mode, which
   does not execute generation or affect account balance.
 
+The source-only `lumenfall_cost_estimator.py` adds a narrower boundary for a
+future Workspace Tool. Its client has no generation, polling, download, cancel,
+or arbitrary-URL operation. It uses fixed image/video URLs that already contain
+`dryRun=true`, disables redirects and environment proxy inheritance, bounds
+timeouts and response bytes, and accepts only confirmed estimate responses.
+Any job, status, output, URL, image, or media marker fails closed. Curated model
+allowlists are checked before key access. This Tool is not deployed.
+
 ## Media controls
 
 - Base64 length is bounded before allocation and decoded length is checked again.

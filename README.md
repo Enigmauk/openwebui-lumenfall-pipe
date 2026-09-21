@@ -1,12 +1,12 @@
-# Open WebUI Lumenfall Media Pipe
+# Open WebUI Lumenfall media integration
 
-An image-only Open WebUI manifold Pipe that exposes a small administrator-curated
-set of Lumenfall models as stable `LF Image · …` entries in the normal model
-selector.
+Source for the deployed image-only Open WebUI manifold Pipe plus bounded,
+development-only video and cost-estimation work.
 
 This repository contains the reviewed image-only v0.1 Function used for the
-Stage 2 production deployment. Video and image editing remain out of scope, and
-the first paid generation is deliberately deferred to Stage 3.
+Stage 2 production deployment. The video worker, video Pipe, Lumenfall Cost
+Estimator Workspace Tool, and `/estimate` Pipe command are not deployed. Image
+editing and the first paid generation remain deferred.
 
 ## Design summary
 
@@ -32,8 +32,13 @@ the first paid generation is deliberately deferred to Stage 3.
 ## Repository map
 
 - `lumenfall_pipe.py` — importable Open WebUI Function and testable core.
+- `lumenfall_cost_estimator.py` — self-contained, source-only Workspace Tool
+  with shared image/video request specifications and a dry-run-only client; not
+  imported into production.
 - `tests/` — no-paid-call automated tests.
 - `ARCHITECTURE.md` — data flow, boundaries, and deliberate trade-offs.
+- `COST_ESTIMATION_ARCHITECTURE.md` — pinned v0.11.3 Tool/Function/Action audit,
+  estimator decision, comparison semantics, and future `/estimate` design.
 - `COMPATIBILITY.md` — exact upstream review and version-sensitive surfaces.
 - `SECURITY.md` — key handling, ownership, limits, and threat boundaries.
 - `INSTALL.md` — later reviewed installation/update/rollback procedure.
