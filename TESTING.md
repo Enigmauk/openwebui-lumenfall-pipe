@@ -11,8 +11,44 @@ transport failures, missing keys, exact integer micros, prompt/context
 isolation, and proof that the estimator exposes no generation/fallback method.
 
 On 2026-09-21 the complete suite passed **149/149** in the exact pinned
-Open WebUI image with `--network none`, a read-only source mount and mocked HTTP
-for every automated test.
+Open WebUI v0.11.3 image with `--network none`, a read-only source mount and
+mocked HTTP for every automated test. On 2026-09-23 the current complete suite
+also passed **149/149** inside the exact prospective/production standard
+v0.11.4 image, pinned by digest
+`sha256:9591b13f13843c7721c2b8eaf7382846c81b3ffe126526d1888d1fed50c6a33f`,
+with `--network none`, read-only source and mocked HTTP.
+
+## Open WebUI v0.11.4 upgrade gate (2026-09-23)
+
+- Official standard v0.11.4 image, upstream commit
+  `8bd8b4fac5e059578ac0c74b3c18d11139f88b7d`, was tested before the production
+  Compose reference changed. Python compilation passed for all 21 current
+  repository `.py` files. The full suite passed 149/149 in 1.703 seconds.
+- The v0.11.4 standard image contains all runtime/test imports required by the
+  deployed Function, deployed Cost Estimator and current tests. The release's
+  removed incidental Python packages are not imported by these targets.
+- A disposable, network-isolated v0.11.4 instance started healthy against a
+  consistent SQLite online-backup copy and copied persistent data. Database
+  integrity passed; the Alembic head remained `d4c1a8e37b62`; existing user,
+  chat, file, Function, Tool and terminal-connection records survived. The
+  production database and cache were not written by the disposable instance.
+- The synthetic public-file test uploaded a tiny image using authenticated
+  `POST /api/v1/files/?process=false`, retrieved metadata and exact bytes,
+  confirmed an unauthenticated read returned 401, deleted the file, confirmed
+  later lookup returned 404, and verified the disposable row and upload were
+  removed. No production Lumenfall request or production secret was needed.
+- The exact deployed Function still returned 14 curated selectors and blocked
+  an unknown internal task. The exact deployed Tool generated five typed
+  schemas and its five Valve fields; v0.11.4 reserved-argument behavior was
+  checked for explicitly declared and undeclared parameters. Admin Tool and
+  terminal routes remained visible on the copy.
+- `git diff --check` and the credential-pattern scan passed; detected
+  credential-shaped strings were a documentation mention of Bearer
+  authentication and synthetic test fixtures only. No Lumenfall generation,
+  paid image request, native image generation, or video deployment occurred.
+- The disposable container and protected temporary data copy were removed
+  after testing. Production rollback material was created separately under
+  `/opt/stacks/openwebui/backups/pre-upgrade-v0.11.4-20260923T210915+0100`.
 
 ## Bounded estimator live validation
 
