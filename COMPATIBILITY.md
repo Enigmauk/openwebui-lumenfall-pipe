@@ -200,7 +200,23 @@ fields. It does not expose dry run as a selector entry.
 
 ## Upgrade gate
 
-Before changing Open WebUI versions:
+### Process-efficiency follow-up — OPEN
+
+The v0.11.4 upgrade demonstrated that running the full conservative compatibility
+workflow can take roughly 90 minutes. That is too slow to use unchanged as the
+default for every routine Open WebUI patch release, particularly because Open
+WebUI releases frequently and some updates contain security fixes that should be
+applied in a reasonable time.
+
+Before the next routine upgrade cycle, refine these compatibility instructions
+so they retain the important safety guarantees while providing a faster path for
+low-risk/familiar patch upgrades and reserving the full validation path for
+releases that change relevant boundaries or otherwise justify it. The reduced
+procedure, exact risk criteria, reusable automation/caching and minimum mandatory
+checks are intentionally not designed here yet; this entry records the need to
+do that work.
+
+Current conservative gate, pending that refinement:
 
 1. review release notes and migration guidance;
 2. compare all source boundaries listed above;
